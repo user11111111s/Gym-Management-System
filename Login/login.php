@@ -1,136 +1,157 @@
 <?php
-session_start();
-include "db_config.php";
 
-// Enable error reporting
-error_reporting(E_ALL);
-ini_set('display_errors', 1);
+declare(strict_types=1);
 
-if (isset($_POST['username']) && isset($_POST['password'])) {
-    function validate($data) {
-        return htmlspecialchars(stripslashes(trim($data)));
-    }
+require_once dirname(__DIR__) . '/config/database.php';
+require_once dirname(__DIR__) . '/config/security.php';
 
-    $user_name = validate($_POST['username']);
-    $password = validate($_POST['password']);
+start_secure_session();
 
-    if (empty($user_name) || empty($password)) {
-        header("Location: index.php?error=Username and Password required");
-        exit();
-    }
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
+    header('Location: index.php');
+    exit();
+}
 
-    // ✅ Check for users
-    $stmt = $conn->prepare("SELECT id, FirstName, LastName, number, gender, email, dob, username, password_hash FROM users WHERE username = ?");
-    if (!$stmt) {
-        die("SQL Error (Users Query): " . $conn->error);
-    }
-    $stmt->bind_param("s", $user_name);
+$username = trim((string) ($_POST['username'] ?? ''));
+$password = (string) ($_POST['password'] ?? '');
+
+if ($username === '' || $password === '') {
+    header('Location: index.php?error=Missing%20Fields');
+    exit();
+}
+
+try {
+    $conn = db_connect();
+
+    /*
+     * 1. Member authentication
+     */
+    $stmt = $conn->prepare(
+        'SELECT id, FirstName, LastName, number, gender, email, dob, username, password_hash
+         FROM users
+         WHERE username = ?
+         LIMIT 1'
+    );
+
+    $stmt->bind_param('s', $username);
     $stmt->execute();
+
     $result = $stmt->get_result();
+    $user = $result->fetch_assoc();
 
-    if ($result->num_rows === 1) {
-        $row = $result->fetch_assoc();
-        $stored_password = $row['password_hash']; // ✅ Use correct column
+    $stmt->close();
 
-        if (password_verify($password, $stored_password)) {
-            $_SESSION['username'] = $row['username'];
-            $_SESSION['FirstName'] = $row['FirstName'];
-            $_SESSION['LastName'] = $row['LastName'];
-            $_SESSION['id'] = $row['id'];
-            $_SESSION['email'] = $row['email'];
-            $_SESSION['number'] = $row['number'];
+    if ($user !== null && !empty($user['password_hash'])) {
+        if (password_verify($password, $user['password_hash'])) {
+            $_SESSION = [];
+            regenerate_session();
 
-            // ✅ Check if user has an active subscription
-            $user_id = $row['id'];
-            $subscription_stmt = $conn->prepare("SELECT * FROM plan_bookings WHERE user_id = ? AND CURRENT_DATE BETWEEN start_date AND end_date LIMIT 1");
-            if (!$subscription_stmt) {
-                die("SQL Error (Plan Bookings Query): " . $conn->error);
-            }
-            $subscription_stmt->bind_param("i", $user_id);
-            $subscription_stmt->execute();
-            $subscription_result = $subscription_stmt->get_result();
+            $_SESSION['role'] = 'member';
+            $_SESSION['username'] = $user['username'];
+            $_SESSION['FirstName'] = $user['FirstName'];
+            $_SESSION['LastName'] = $user['LastName'];
+            $_SESSION['id'] = (int) $user['id'];
+            $_SESSION['email'] = $user['email'];
+            $_SESSION['number'] = $user['number'];
 
-            if ($subscription_result->num_rows > 0) {
-                header("Location: ../Gym User Management");
+            $subscriptionStmt = $conn->prepare(
+                'SELECT 1
+                 FROM plan_bookings
+                 WHERE user_id = ?
+                   AND CURRENT_DATE BETWEEN start_date AND end_date
+                 LIMIT 1'
+            );
+
+            $subscriptionStmt->bind_param('i', $user['id']);
+            $subscriptionStmt->execute();
+
+            $subscriptionResult = $subscriptionStmt->get_result();
+            $hasSubscription = $subscriptionResult->num_rows > 0;
+
+            $subscriptionStmt->close();
+
+            if ($hasSubscription) {
+                header('Location: ../Gym User Management/');
             } else {
-                header("Location: ../plan_section/index.html");
+                header('Location: ../plan_section/index.html');
             }
+
             exit();
         }
     }
-    $stmt->close();
 
-    // ✅ Check for trainers
-$stmt = $conn->prepare("SELECT trainer_id, FirstName, trainer_username, password_hash FROM trainers WHERE trainer_username = ?");
-if (!$stmt) {
-    die("SQL Error (Trainers Query): " . $conn->error);
-}
-$stmt->bind_param("s", $user_name);
-$stmt->execute();
-$result = $stmt->get_result();
+    /*
+     * 2. Trainer authentication
+     *
+     * Only password hashes are accepted.
+     * Plaintext trainer passwords are intentionally no longer accepted.
+     */
+    $stmt = $conn->prepare(
+        'SELECT trainer_id, FirstName, trainer_username, password_hash
+         FROM trainers
+         WHERE trainer_username = ?
+         LIMIT 1'
+    );
 
-if ($result->num_rows === 1) {
-    $row = $result->fetch_assoc();
-    $stored_password = $row['password_hash'];
-
-    // ✅ Check if stored password is hashed or plain text
-    if (password_verify($password, $stored_password) || $password === $stored_password) {
-        // If it's either hashed or plain text and matches, log in the trainer
-        $_SESSION['trainer_id'] = $row['trainer_id'];
-        $_SESSION['trainer_name'] = $row['FirstName'];
-        $_SESSION['trainer_username'] = $row['trainer_username'];
-
-        // ✅ Upgrade plain text passwords to hashed
-        if ($password === $stored_password) {
-            $new_hashed_password = password_hash($password, PASSWORD_DEFAULT);
-            $update_stmt = $conn->prepare("UPDATE trainers SET password_hash = ? WHERE trainer_id = ?");
-            $update_stmt->bind_param("si", $new_hashed_password, $row['trainer_id']);
-            $update_stmt->execute();
-            $update_stmt->close();
-        }
-
-        header("Location: ../trainer/dashboard.php");
-        exit();
-    }
-}
-$stmt->close();
-
-
-
-    // ✅ Check for admin
-    $stmt = $conn->prepare("SELECT admin_id, name, password_hash FROM admin WHERE admin_id = ?");
-    if (!$stmt) {
-        die("SQL Error (Admin Query): " . $conn->error);
-    }
-    $stmt->bind_param("s", $user_name);
+    $stmt->bind_param('s', $username);
     $stmt->execute();
+
     $result = $stmt->get_result();
-    
-    if ($result->num_rows === 1) {
-        $row = $result->fetch_assoc();
-        $stored_password = $row['password_hash'];
-    
-        // Check if stored password is hashed (assuming hashed passwords start with "$2y$")
-        if (password_needs_rehash($stored_password, PASSWORD_DEFAULT) || password_verify($password, $stored_password)) {
-            $_SESSION['admin_id'] = $row['admin_id'];
-            $_SESSION['username'] = $row['name'];
-            header("Location: ../admin/index.php");
-            exit();
-        } elseif ($password === $stored_password) { // Plain text password check
-            $_SESSION['admin_id'] = $row['admin_id'];
-            $_SESSION['username'] = $row['name'];
-            header("Location: ../admin/index.php");
+    $trainer = $result->fetch_assoc();
+
+    $stmt->close();
+
+    if ($trainer !== null && !empty($trainer['password_hash'])) {
+        if (password_verify($password, $trainer['password_hash'])) {
+            $_SESSION = [];
+            regenerate_session();
+
+            $_SESSION['role'] = 'trainer';
+            $_SESSION['trainer_id'] = (int) $trainer['trainer_id'];
+            $_SESSION['trainer_name'] = $trainer['FirstName'];
+            $_SESSION['trainer_username'] = $trainer['trainer_username'];
+
+            header('Location: ../trainer/dashboard.php');
             exit();
         }
     }
-    $stmt->close();
-    
 
-    // ❌ Authentication failed
-    header("Location: index.php?error=Incorrect Credentials");
-    exit();
-} else {
-    header("Location: index.php?error=Missing Fields");
-    exit();
+    /*
+     * 3. Admin authentication
+     *
+     * Only password hashes are accepted.
+     */
+    $stmt = $conn->prepare(
+        'SELECT admin_id, name, password_hash
+         FROM admin
+         WHERE admin_id = ?
+         LIMIT 1'
+    );
+
+    $stmt->bind_param('s', $username);
+    $stmt->execute();
+
+    $result = $stmt->get_result();
+    $admin = $result->fetch_assoc();
+
+    $stmt->close();
+
+    if ($admin !== null && !empty($admin['password_hash'])) {
+        if (password_verify($password, $admin['password_hash'])) {
+            $_SESSION = [];
+            regenerate_session();
+
+            $_SESSION['role'] = 'admin';
+            $_SESSION['admin_id'] = (int) $admin['admin_id'];
+            $_SESSION['username'] = $admin['name'];
+
+            header('Location: ../admin/index.php');
+            exit();
+        }
+    }
+} catch (Throwable $e) {
+    error_log('Login error: ' . $e->getMessage());
 }
-?>
+
+header('Location: index.php?error=Incorrect%20Credentials');
+exit();

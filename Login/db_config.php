@@ -1,10 +1,7 @@
 <?php
-$sname="localhost:3306";
-$username="root";
-$password="";
-$db_name="miniproject_db";
-$conn=mysqli_connect($sname, $username, $password, $db_name);
 
-if(!$conn){
-    echo "Connection Failed!";
-}
+declare(strict_types=1);
+
+require_once dirname(__DIR__) . '/config/database.php';
+
+$conn = db_connect();
