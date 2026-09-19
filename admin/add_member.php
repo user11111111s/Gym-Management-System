@@ -1,3 +1,14 @@
+<?php
+
+declare(strict_types=1);
+
+require_once dirname(__DIR__) . '/config/security.php';
+
+require_admin();
+
+$csrfToken = csrf_token();
+?>
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -162,6 +173,11 @@
 
             <div class="form-container">
                 <form action="process_member.php" method="POST" enctype="multipart/form-data" id="memberForm">
+                    <input
+    type="hidden"
+    name="csrf_token"
+    value="<?= htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8') ?>"
+>
                     <div class="form-grid">
                         <!-- Personal Information -->
                         <div class="form-group">

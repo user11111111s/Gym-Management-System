@@ -8,6 +8,8 @@ require_once dirname(__DIR__) . '/config/security.php';
 
 start_secure_session();
 require_admin();
+require_post_request();
+require_csrf_token();
 
 require_once __DIR__ . '/db_connect.php';
 

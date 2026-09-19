@@ -1,10 +1,12 @@
 <?php
-include('db_connect.php');
 
-if(isset($_POST['submit'])) {
-    // Handle form submission and file upload here
-    // This will be implemented in process_trainer.php
-}
+declare(strict_types=1);
+
+require_once dirname(__DIR__) . '/config/security.php';
+
+require_admin();
+
+$csrfToken = csrf_token();
 ?>
 
 <!DOCTYPE html>
@@ -220,6 +222,11 @@ if(isset($_POST['submit'])) {
             <h1>Add New Trainer</h1>
             <div class="form-container">
                 <form action="process_trainer.php" method="POST" enctype="multipart/form-data" id="trainerForm">
+                    <input
+    type="hidden"
+    name="csrf_token"
+    value="<?= htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8') ?>"
+>
                     <div class="form-grid">
                         <!-- Personal Information -->
 
