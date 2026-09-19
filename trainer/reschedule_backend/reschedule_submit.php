@@ -1,53 +1,149 @@
 <?php
-session_start();
-require_once '../db_config.php';
 
-if (!isset($_SESSION['trainer_id'])) {
-    header('Location: login.php');
-    exit;
+declare(strict_types=1);
+
+require_once dirname(__DIR__, 2) . '/config/security.php';
+
+start_secure_session();
+
+if (
+    ($_SESSION['role'] ?? '') !== 'trainer' ||
+    !isset($_SESSION['trainer_id']) ||
+    !is_numeric($_SESSION['trainer_id'])
+) {
+    header('Location: ../../Login/index.php?error=Please%20login');
+    exit();
 }
 
-$trainer_id = $_SESSION['trainer_id'];
-$request_type = $_POST['request_type'];
-$start_date = $_POST['start_date'];
-$end_date = $_POST['end_date'];
-$new_start_time = $_POST['new_start_time'] ?? null;
-$new_end_time = $_POST['new_end_time'] ?? null;
+require_post_request();
+require_csrf_token();
 
-// Check if a request already exists for the same date range
-$check_query = "SELECT COUNT(*) FROM trainer_reschedules 
-                WHERE trainer_id = ? 
-                AND (start_date <= ? AND end_date >= ?)";
+$trainerId = (int) $_SESSION['trainer_id'];
 
-$check_stmt = $conn->prepare($check_query);
-$check_stmt->bind_param("sss", $trainer_id, $end_date, $start_date); // FIXED: changed "iss" to "sss"
-$check_stmt->execute();
-$check_stmt->bind_result($count);
-$check_stmt->fetch();
-$check_stmt->close();
+$requestType = trim((string) ($_POST['request_type'] ?? ''));
+$startDate = trim((string) ($_POST['start_date'] ?? ''));
+$endDate = trim((string) ($_POST['end_date'] ?? ''));
+$newStartTime = trim((string) ($_POST['new_start_time'] ?? ''));
+$newEndTime = trim((string) ($_POST['new_end_time'] ?? ''));
 
-if ($count > 0) {
-    $_SESSION['error'] = "You have already submitted a request for the selected dates.";
-    header("Location: ../reschedule.php");
-    exit;
+$allowedTypes = ['leave', 'part-time', 'full-time'];
+
+if (!in_array($requestType, $allowedTypes, true)) {
+    $_SESSION['error'] = 'Invalid request type.';
+    header('Location: ../reschedule.php');
+    exit();
 }
 
-// Insert the new request
-$query = "INSERT INTO trainer_reschedules (trainer_id, request_type, start_date, end_date, new_start_time, new_end_time, status, created_at) 
-          VALUES (?, ?, ?, ?, ?, ?, 'pending', NOW())";
+$startDateObject = DateTime::createFromFormat('Y-m-d', $startDate);
+$endDateObject = DateTime::createFromFormat('Y-m-d', $endDate);
 
-$stmt = $conn->prepare($query);
-$stmt->bind_param("isssss", $trainer_id, $request_type, $start_date, $end_date, $new_start_time, $new_end_time);
+if (
+    !$startDateObject ||
+    $startDateObject->format('Y-m-d') !== $startDate ||
+    !$endDateObject ||
+    $endDateObject->format('Y-m-d') !== $endDate
+) {
+    $_SESSION['error'] = 'Invalid date provided.';
+    header('Location: ../reschedule.php');
+    exit();
+}
 
-if ($stmt->execute()) {
-    $_SESSION['success'] = "Your reschedule request has been submitted for approval.";
+if ($startDate > $endDate) {
+    $_SESSION['error'] = 'End date must be on or after the start date.';
+    header('Location: ../reschedule.php');
+    exit();
+}
+
+if ($requestType === 'leave') {
+    $newStartTime = null;
+    $newEndTime = null;
 } else {
-    $_SESSION['error'] = "There was an error submitting your request. Please try again.";
+    if ($newStartTime === '' || $newEndTime === '') {
+        $_SESSION['error'] = 'Start and end times are required for shift requests.';
+        header('Location: ../reschedule.php');
+        exit();
+    }
+
+    $startTimeObject = DateTime::createFromFormat('H:i', $newStartTime);
+    $endTimeObject = DateTime::createFromFormat('H:i', $newEndTime);
+
+    if (
+        !$startTimeObject ||
+        $startTimeObject->format('H:i') !== $newStartTime ||
+        !$endTimeObject ||
+        $endTimeObject->format('H:i') !== $newEndTime
+    ) {
+        $_SESSION['error'] = 'Invalid time provided.';
+        header('Location: ../reschedule.php');
+        exit();
+    }
+
+    if ($newStartTime >= $newEndTime) {
+        $_SESSION['error'] = 'End time must be after start time.';
+        header('Location: ../reschedule.php');
+        exit();
+    }
 }
+
+require_once dirname(__DIR__) . '/db_config.php';
+
+// Prevent overlapping pending/approved requests.
+$checkQuery = "SELECT COUNT(*)
+               FROM trainer_reschedules
+               WHERE trainer_id = ?
+                 AND status IN ('pending', 'approved')
+                 AND start_date <= ?
+                 AND end_date >= ?";
+
+$checkStmt = $conn->prepare($checkQuery);
+$checkStmt->bind_param(
+    'iss',
+    $trainerId,
+    $endDate,
+    $startDate
+);
+$checkStmt->execute();
+$checkStmt->bind_result($existingCount);
+$checkStmt->fetch();
+$checkStmt->close();
+
+if ($existingCount > 0) {
+    $_SESSION['error'] = 'You already have a request covering part of these dates.';
+    header('Location: ../reschedule.php');
+    exit();
+}
+
+$insertQuery = "INSERT INTO trainer_reschedules
+                (
+                    trainer_id,
+                    request_type,
+                    start_date,
+                    end_date,
+                    new_start_time,
+                    new_end_time,
+                    status,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, 'pending', NOW())";
+
+$stmt = $conn->prepare($insertQuery);
+
+$stmt->bind_param(
+    'isssss',
+    $trainerId,
+    $requestType,
+    $startDate,
+    $endDate,
+    $newStartTime,
+    $newEndTime
+);
+
+$stmt->execute();
 
 $stmt->close();
 $conn->close();
 
-header("Location: ../reschedule.php");
-exit;
-?>
+$_SESSION['success'] = 'Your reschedule request has been submitted for approval.';
+
+header('Location: ../reschedule.php');
+exit();

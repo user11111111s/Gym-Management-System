@@ -73,3 +73,38 @@ function require_post_request(): void
         exit('Method Not Allowed');
     }
 }
+
+
+function csrf_token(): string
+{
+    start_secure_session();
+
+    if (
+        !isset($_SESSION['csrf_token']) ||
+        !is_string($_SESSION['csrf_token']) ||
+        $_SESSION['csrf_token'] === ''
+    ) {
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+    }
+
+    return $_SESSION['csrf_token'];
+}
+
+function require_csrf_token(): void
+{
+    start_secure_session();
+
+    $sessionToken = $_SESSION['csrf_token'] ?? '';
+    $submittedToken = $_POST['csrf_token'] ?? '';
+
+    if (
+        !is_string($sessionToken) ||
+        !is_string($submittedToken) ||
+        $sessionToken === '' ||
+        $submittedToken === '' ||
+        !hash_equals($sessionToken, $submittedToken)
+    ) {
+        http_response_code(403);
+        exit('Invalid CSRF token');
+    }
+}
