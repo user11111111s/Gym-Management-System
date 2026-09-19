@@ -108,3 +108,38 @@ function require_csrf_token(): void
         exit('Invalid CSRF token');
     }
 }
+
+function require_admin(string $loginPath = '../Login/index.php'): void
+{
+    start_secure_session();
+
+    if (
+        ($_SESSION['role'] ?? '') !== 'admin' ||
+        !isset($_SESSION['admin_id']) ||
+        !is_numeric($_SESSION['admin_id'])
+    ) {
+        header('Location: ' . $loginPath);
+        exit();
+    }
+}
+
+function require_admin_json(): void
+{
+    start_secure_session();
+
+    if (
+        ($_SESSION['role'] ?? '') !== 'admin' ||
+        !isset($_SESSION['admin_id']) ||
+        !is_numeric($_SESSION['admin_id'])
+    ) {
+        http_response_code(403);
+        header('Content-Type: application/json; charset=utf-8');
+
+        echo json_encode([
+            'status' => 'error',
+            'message' => 'Administrator authentication required.'
+        ]);
+
+        exit();
+    }
+}

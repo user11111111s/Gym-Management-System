@@ -1,14 +1,7 @@
 <?php
-$servername = "localhost";  // Added the correct port number
-$username = "root";
-$password = ""; 
-$dbname = "miniproject_db";
 
-// Create connection
-$conn = new mysqli($servername, $username, $password, $dbname);
+declare(strict_types=1);
 
-// Check connection
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
-}
-?>
+require_once dirname(__DIR__, 2) . '/config/database.php';
+
+$conn = db_connect();

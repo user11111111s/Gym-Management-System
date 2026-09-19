@@ -1,9 +1,15 @@
 <?php
+
+declare(strict_types=1);
+
 require __DIR__ . '/vendor/autoload.php';
-error_reporting(E_ALL);
-ini_set('display_errors', 1);
-session_start();
-include('db_connect.php');
+
+require_once dirname(__DIR__) . '/config/security.php';
+
+start_secure_session();
+require_admin();
+
+require_once __DIR__ . '/db_connect.php';
 
 // Import necessary libraries
 use Endroid\QrCode\QrCode;

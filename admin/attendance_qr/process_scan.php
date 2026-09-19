@@ -1,6 +1,16 @@
 <?php
-session_start();
-include 'db_config.php'; // Ensure this file connects to your database
+
+declare(strict_types=1);
+
+require_once dirname(__DIR__, 2) . '/config/security.php';
+
+start_secure_session();
+require_admin_json();
+require_post_request();
+
+require_once __DIR__ . '/db_config.php';
+
+header('Content-Type: application/json; charset=utf-8');
 
 // Get and decode input data
 $input = file_get_contents('php://input');

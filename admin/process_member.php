@@ -1,8 +1,15 @@
 <?php
+
+declare(strict_types=1);
+
 require __DIR__ . '/vendor/autoload.php';
 
-session_start();
-include('db_connect.php');
+require_once dirname(__DIR__) . '/config/security.php';
+
+start_secure_session();
+require_admin();
+
+require_once __DIR__ . '/db_connect.php';
 
 use Endroid\QrCode\QrCode;
 use Endroid\QrCode\Writer\PngWriter;
