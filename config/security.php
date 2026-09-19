@@ -143,3 +143,87 @@ function require_admin_json(): void
         exit();
     }
 }
+function save_uploaded_image(
+    array $file,
+    string $destinationDir,
+    string $publicPrefix,
+    int $maxBytes = 5_242_880
+): string {
+    if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        throw new RuntimeException('Image upload failed.');
+    }
+
+    if (
+        !isset($file['tmp_name'], $file['size']) ||
+        !is_string($file['tmp_name'])
+    ) {
+        throw new RuntimeException('Invalid image upload.');
+    }
+
+    if (!is_uploaded_file($file['tmp_name'])) {
+        throw new RuntimeException('Invalid uploaded file.');
+    }
+
+    $fileSize = (int) $file['size'];
+
+    if ($fileSize <= 0 || $fileSize > $maxBytes) {
+        throw new RuntimeException('Image must be between 1 byte and 5 MB.');
+    }
+
+    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+
+    if ($finfo === false) {
+        throw new RuntimeException('Unable to inspect uploaded file.');
+    }
+
+    $mimeType = finfo_file($finfo, $file['tmp_name']);
+    finfo_close($finfo);
+
+    $allowedTypes = [
+        'image/jpeg' => [
+            'extension' => 'jpg',
+            'image_type' => IMAGETYPE_JPEG,
+        ],
+        'image/png' => [
+            'extension' => 'png',
+            'image_type' => IMAGETYPE_PNG,
+        ],
+    ];
+
+    if (!isset($allowedTypes[$mimeType])) {
+        throw new RuntimeException('Only JPEG and PNG images are allowed.');
+    }
+
+    $imageInfo = @getimagesize($file['tmp_name']);
+
+    if (
+        $imageInfo === false ||
+        !isset($imageInfo[2]) ||
+        $imageInfo[2] !== $allowedTypes[$mimeType]['image_type']
+    ) {
+        throw new RuntimeException('Uploaded file is not a valid image.');
+    }
+
+    if (!is_dir($destinationDir)) {
+        if (!mkdir($destinationDir, 0755, true) && !is_dir($destinationDir)) {
+            throw new RuntimeException('Unable to create upload directory.');
+        }
+    }
+
+    $filename = bin2hex(random_bytes(16))
+        . '.'
+        . $allowedTypes[$mimeType]['extension'];
+
+    $targetPath = rtrim(
+        $destinationDir,
+        DIRECTORY_SEPARATOR
+    ) . DIRECTORY_SEPARATOR . $filename;
+
+    if (!move_uploaded_file($file['tmp_name'], $targetPath)) {
+        throw new RuntimeException('Unable to save uploaded image.');
+    }
+
+    chmod($targetPath, 0644);
+
+    return rtrim($publicPrefix, '/') . '/' . $filename;
+}

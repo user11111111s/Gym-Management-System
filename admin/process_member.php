@@ -24,10 +24,14 @@ use PHPMailer\PHPMailer\Exception;
 
 // Function to generate member ID card
 function generateMemberCard($memberData) {
-    // Create member_cards directory if it doesn't exist
-    if (!file_exists('member_cards')) {
-        mkdir('member_cards', 0777, true);
+   // Create member_cards directory if it doesn't exist
+$memberCardsDir = __DIR__ . '/member_cards';
+
+if (!is_dir($memberCardsDir)) {
+    if (!mkdir($memberCardsDir, 0755, true) && !is_dir($memberCardsDir)) {
+        throw new RuntimeException('Unable to create member cards directory.');
     }
+}
 
     // Generate QR Code
     $qrCode = new QrCode('GYMSHARK-MEMBER-' . $memberData['username']);       
@@ -37,9 +41,14 @@ function generateMemberCard($memberData) {
     // Create the QR code result
     $result = $writer->write($qrCode);
     
-    // Save QR code
-    $qrPath = 'member_cards/qr_' . $memberData['id'] . '.png';
-    file_put_contents($qrPath, $result->getString());
+    $qrPath = 'member_cards/qr_' . (int) $memberData['id'] . '.png';
+$qrFilePath = __DIR__ . '/' . $qrPath;
+
+if (file_put_contents($qrFilePath, $result->getString(), LOCK_EX) === false) {
+    throw new RuntimeException('Unable to save member QR code.');
+}
+
+chmod($qrFilePath, 0644);
     
     // Calculate age from DOB
     $dob = new DateTime($memberData['dob']);
@@ -310,30 +319,81 @@ function sendWelcomeEmail($memberData) {
 }
 
 // Function to save base64 image from camera capture
-function saveBase64Image($base64Data, $targetDir) {
-    // Check if the directory exists, create if not
-    if (!file_exists($targetDir)) {
-        mkdir($targetDir, 0777, true);
+function saveBase64Image($base64Data, $targetDir): string
+{
+    if (!is_string($base64Data) || $base64Data === '') {
+        throw new RuntimeException('Invalid image data.');
     }
-    
-    // Remove header from base64 string if present
+
     if (strpos($base64Data, ',') !== false) {
-        $base64Data = explode(',', $base64Data)[1];
+        $parts = explode(',', $base64Data, 2);
+        $base64Data = $parts[1];
     }
-    
-    // Decode base64 data
-    $imageData = base64_decode($base64Data);
-    
-    // Generate a unique filename
-    $filename = uniqid() . '.png';
-    $targetFile = $targetDir . $filename;
-    
-    // Save the image
-    if (file_put_contents($targetFile, $imageData)) {
+
+    $imageData = base64_decode($base64Data, true);
+
+    if ($imageData === false || $imageData === '') {
+        throw new RuntimeException('Invalid base64 image data.');
+    }
+
+    if (strlen($imageData) > 5_242_880) {
+        throw new RuntimeException('Image is too large.');
+    }
+
+    $temporaryFile = tempnam(sys_get_temp_dir(), 'gymshark_img_');
+
+    if ($temporaryFile === false) {
+        throw new RuntimeException('Unable to create temporary image file.');
+    }
+
+    try {
+        if (file_put_contents($temporaryFile, $imageData, LOCK_EX) === false) {
+            throw new RuntimeException('Unable to write temporary image.');
+        }
+
+        $imageInfo = @getimagesize($temporaryFile);
+
+        if ($imageInfo === false) {
+            throw new RuntimeException('Uploaded data is not a valid image.');
+        }
+
+        $allowedTypes = [
+            IMAGETYPE_JPEG => 'jpg',
+            IMAGETYPE_PNG => 'png',
+        ];
+
+        $imageType = $imageInfo[2] ?? null;
+
+        if (!isset($allowedTypes[$imageType])) {
+            throw new RuntimeException('Only JPEG and PNG images are allowed.');
+        }
+
+        if (!is_dir($targetDir)) {
+            if (!mkdir($targetDir, 0755, true) && !is_dir($targetDir)) {
+                throw new RuntimeException('Unable to create image directory.');
+            }
+        }
+
+        $filename = bin2hex(random_bytes(16))
+            . '.'
+            . $allowedTypes[$imageType];
+
+        $targetFile = rtrim($targetDir, DIRECTORY_SEPARATOR)
+            . DIRECTORY_SEPARATOR
+            . $filename;
+
+        if (!copy($temporaryFile, $targetFile)) {
+            throw new RuntimeException('Unable to save image.');
+        }
+
+        chmod($targetFile, 0644);
+
         return $targetFile;
+    } finally {
+        if (is_file($temporaryFile)) {
+            unlink($temporaryFile);
+        }
     }
-    
-    return false;
 }
 
 // Main process
@@ -353,24 +413,19 @@ if(isset($_POST['submit'])) {
     
     $check_stmt->close();
 
-    // Handle file upload
-    $profile_pic = '';
-    if(isset($_FILES['profile_pic']) && $_FILES['profile_pic']['error'] == 0) {
-        $target_dir = "uploads/";
-        if (!is_dir($target_dir) && !mkdir($target_dir, 0777, true)) {
-            die("Error: Unable to create uploads directory!");
-        }
+   // Secure profile image upload
+$profile_pic = '';
 
-        $file_extension = strtolower(pathinfo($_FILES["profile_pic"]["name"], PATHINFO_EXTENSION));
-        $new_filename = uniqid() . '.' . $file_extension;
-        $target_file = $target_dir . $new_filename;
-        
-        if(move_uploaded_file($_FILES["profile_pic"]["tmp_name"], $target_file)) {
-            $profile_pic = $target_file;
-        } else {
-            die("Error: File upload failed.");
-        }
-    }
+if (
+    isset($_FILES['profile_pic']) &&
+    ($_FILES['profile_pic']['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK
+) {
+    $profile_pic = save_uploaded_image(
+        $_FILES['profile_pic'],
+        __DIR__ . '/uploads',
+        'uploads'
+    );
+}
 
     // Insert into users table
     $sql = "INSERT INTO users (FirstName, LastName, username, email, number, dob, gender, 

@@ -28,61 +28,48 @@ function logMessage($message, $type = 'info', $file = 'app_log.txt') {
 }
 
 // Save profile picture from file upload
-function saveProfilePicture($fileData) {
-    try {
-        $target_dir = "uploads/trainers/";
-        
-        // Create directory if it doesn't exist
-        if (!file_exists($target_dir) && !mkdir($target_dir, 0777, true)) {
-            throw new Exception("Failed to create upload directory");
-        }
-        
-        // Validate file type
-        $allowedTypes = ['image/jpeg', 'image/png', 'image/jpg'];
-        if (!in_array($fileData['type'], $allowedTypes)) {
-            throw new Exception("Invalid file format. Only JPG and PNG allowed.");
-        }
-        
-        // Generate unique filename
-        $file_name = time() . "_" . basename($fileData["name"]);
-        $target_file = $target_dir . $file_name;
-        
-        // Move uploaded file
-        if (!move_uploaded_file($fileData["tmp_name"], $target_file)) {
-            throw new Exception("Failed to save uploaded image");
-        }
-        
-        return $target_file;
-    } catch (Exception $e) {
-        logMessage("Profile picture save error: " . $e->getMessage(), 'error');
-        return null;
-    }
+function saveProfilePicture(array $fileData): string
+{
+    return save_uploaded_image(
+        $fileData,
+        __DIR__ . '/uploads/trainers',
+        'uploads/trainers'
+    );
 }
-
 // Generate QR code for trainer ID
-function generateQRCode($trainerId) {
+function generateQRCode($trainerId): string
+{
     try {
-        $qrDir = 'trainer_cards/';
-        
-        // Create directory if it doesn't exist
-        if (!file_exists($qrDir) && !mkdir($qrDir, 0777, true)) {
-            throw new Exception("Failed to create QR code directory");
+        $qrDir = __DIR__ . '/trainer_cards';
+
+        if (!is_dir($qrDir)) {
+            if (!mkdir($qrDir, 0755, true) && !is_dir($qrDir)) {
+                throw new RuntimeException('Failed to create QR code directory');
+            }
         }
-        
-        // Generate QR code data
+
         $qrCode = new QrCode('GYMSHARK-TRAINER-' . $trainerId);
+
         $writer = new PngWriter();
         $result = $writer->write($qrCode);
-        
-        // Save QR code
-        $qrPath = $qrDir . 'qr_' . $trainerId . '.png';
-        if (file_put_contents($qrPath, $result->getString()) === false) {
-            throw new Exception("Failed to save QR code");
+
+        $filename = 'qr_' . (int) $trainerId . '.png';
+        $qrPath = $qrDir . DIRECTORY_SEPARATOR . $filename;
+
+        if (file_put_contents($qrPath, $result->getString(), LOCK_EX) === false) {
+            throw new RuntimeException('Failed to save QR code');
         }
-        
-        return $qrPath;
-    } catch (Exception $e) {
-        logMessage("QR code generation error: " . $e->getMessage(), 'error');
+
+        chmod($qrPath, 0644);
+
+        return 'trainer_cards/' . $filename;
+
+    } catch (Throwable $e) {
+        logMessage(
+            'QR code generation error: ' . $e->getMessage(),
+            'error'
+        );
+
         throw $e;
     }
 }
